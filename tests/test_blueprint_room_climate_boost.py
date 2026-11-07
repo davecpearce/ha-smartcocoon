@@ -633,9 +633,7 @@ async def test_max_hook_unset_loads_and_is_quiet(
 _OFF_HELPER = "input_boolean.off"
 
 
-async def test_instant_off_edge(
-    hass: HomeAssistant, calls: list[ServiceCall]
-) -> None:
+async def test_instant_off_edge(hass: HomeAssistant, calls: list[ServiceCall]) -> None:
     """Turning the OFF helper ON commands 0 immediately (no room change)."""
     await _setup(hass, {"force_off_boolean": _OFF_HELPER})
     hass.states.async_set(_OFF_HELPER, "off")
@@ -658,13 +656,71 @@ async def test_off_stays_silent_while_on(
     await hass.async_block_till_done()
     calls.clear()
 
-    # Simulate room getting hot (would normally trigger boost)
-    hass.states.async_set("sensor.room", "25.0")  # way above setpoint
+    hass.states.async_set(ROOM, "25.0")  # hot enough to demand a full boost
     await hass.async_block_till_done()
-    # Automation should not fire because force_off is still ON and forces 0%
-    if calls:
-        # If it did fire, it should still command 0%
-        assert _last_pct(calls) == 0
+    # Whether or not it re-fires, nothing may command the fan above silence.
+    assert all(int(c.data["percentage"]) == 0 for c in calls), [
+        c.data["percentage"] for c in calls
+    ]
+
+
+async def test_off_toggle_off_resumes_to_baseline(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Toggling force_off back OFF re-enables automation at once, not on the next tick.
+
+    Regression guard for the trap that silencing sets 0%, which IS the 'off'
+    state -- so the automation must not read its own silence as a manual opt-out.
+    """
+    await _setup(hass, {"force_off_boolean": _OFF_HELPER})
+    hass.states.async_set(_OFF_HELPER, "on")
+    _prime_idle(hass, fan_pct=0)
+    # Silencing really does land the entity in 'off', indistinguishable from a
+    # human switching it off. That is the whole trap.
+    hass.states.async_set(FAN, "off", {})
+    await hass.async_block_till_done()
+    calls.clear()
+
+    hass.states.async_set(_OFF_HELPER, "off")  # only change
+    await hass.async_block_till_done()
+    assert _last_pct(calls) == 8
+
+
+async def test_off_resumes_on_an_ordinary_trigger_too(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Resumption must not depend on catching the helper's OFF edge.
+
+    If the helper flips OFF while the automation is not listening (HA down, or
+    automations reloading), no OFF-edge trigger ever fires. Wiring the helper
+    therefore has to make an off fan actionable on *any* trigger, or the room
+    stays silent forever.
+    """
+    hass.states.async_set(_OFF_HELPER, "off")
+    await _setup(hass, {"force_off_boolean": _OFF_HELPER})
+    _prime_idle(hass, fan_pct=0)
+    hass.states.async_set(FAN, "off", {})
+    await hass.async_block_till_done()
+    calls.clear()
+
+    hass.states.async_set(ROOM, "20.5")  # an ordinary trigger, not the helper
+    await hass.async_block_till_done()
+    assert _last_pct(calls) == 8
+
+
+async def test_manual_off_still_respected_when_hook_unset(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Control: with no helper wired, a hand-switched-off fan is still left alone."""
+    await _setup(hass)  # no force_off_boolean
+    _prime_idle(hass, fan_pct=0)
+    hass.states.async_set(FAN, "off", {})
+    await hass.async_block_till_done()
+    calls.clear()
+
+    hass.states.async_set(ROOM, "20.5")
+    await hass.async_block_till_done()
+    assert len(calls) == 0
 
 
 async def test_off_hook_unset_loads_and_is_quiet(

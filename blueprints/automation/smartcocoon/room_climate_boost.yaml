@@ -24,7 +24,7 @@ blueprint:
       * blower on, no active demand, home -> EQUALIZE toward the house (see below)
       * otherwise (idle / within range) -> baseline_speed
       * force_max boolean ON -> 100% override (bypasses EVERYTHING, incl. manual OFF)
-      * force_off boolean ON -> 0% silence (explicit OPT-OUT of automation; YOU must turn it back OFF to resume within ~10 min)
+      * force_off boolean ON -> 0% silence (explicit OPT-OUT; YOU turn it back OFF and automation resumes at once)
 
     Set enable_cooling / enable_heating to manage only one direction.
 
@@ -275,14 +275,20 @@ blueprint:
     force_off_boolean:
       name: Force-OFF (silence) boolean (optional input_boolean)
       description: >-
-        Optional global silence switch. When this input_boolean is ON, force this
-        fan to 0% (OFF), short-circuiting ALL automation logic and overriding all
-        other controls. This is an EXPLICIT OPT-OUT of the blueprint: while ON,
-        the automation does nothing and the fan stays silent regardless of room
-        temp, thermostat state, or demand. YOU are responsible for turning this
-        OFF when you want automation to resume. Silence activates instantly; resuming
-        takes up to ~10 min (waits for next re-eval tick). Point every room's instance
-        at the same helper for one whole-house silence switch (the opposite of force_max).
+        Optional silence switch -- the opposite of Force-MAX. While ON, this fan is
+        forced to 0% (OFF), short-circuiting ALL automation logic and overriding every
+        other control: the automation does nothing and the fan stays silent regardless
+        of room temp, thermostat state, or demand. It is an EXPLICIT OPT-OUT, not a
+        timer -- YOU turn it back OFF, and automation then resumes immediately.
+        Point every room's instance at the same helper for one whole-house silence
+        switch, or give each room its own for per-room silence.
+
+        IMPORTANT TRADE-OFF: setting this input makes the helper the opt-out channel
+        for this room, which REPLACES the blueprint's default "a fan you switched off
+        by hand is left alone" behaviour. With the helper wired, switching the fan off
+        in the vendor app no longer opts out -- the automation reclaims it on the next
+        re-evaluation (within ~10 min). Leave this input unset to keep the default
+        manual-OFF behaviour instead.
       default:
       selector:
         entity:
@@ -456,12 +462,15 @@ trigger:
   - platform: template
     value_template: >-
       {{ force_max_entity not in [none, 'none', ''] and is_state(force_max_entity, 'off') }}
-  # Instant whole-house silence/OFF (ON edge only; OFF edge relies on /10 min tick).
-  # ON gives immediate 0%. When turned OFF, automation resumes within ~10 min on the
-  # next re-eval (not instant). This is acceptable: silence NOW is critical; resume can wait.
+  # Instant silence, both edges: ON -> 0% at once, OFF -> automation resumes at once.
+  # A template trigger only fires on false->true, so each edge needs its own. The OFF edge is
+  # for latency only -- the /10 tick would also resume (see the condition's helper carve-out).
   - platform: template
     value_template: >-
       {{ force_off_entity not in [none, 'none', ''] and is_state(force_off_entity, 'on') }}
+  - platform: template
+    value_template: >-
+      {{ force_off_entity not in [none, 'none', ''] and is_state(force_off_entity, 'off') }}
   - platform: state
     entity_id: !input room_sensor
   - platform: state
@@ -479,13 +488,19 @@ trigger:
   - platform: time_pattern
     minutes: /10 # safety re-eval + night boundary rollover + speed-floor pickup
 
-# Respect a manual OFF (baseline is always >0, so an off fan is a human signal).
-# Allow action if: force_manage/max/off are on, OR the fan is manually on, AND it's not offline.
+# Respect a manual OFF (baseline is always >0, so an off fan is a human signal) -- UNLESS a
+# force_off helper is configured, in which case that helper is the opt-out channel and an off
+# fan is no longer read as intent. Required for correctness, not just ergonomics: silencing
+# sets 0%, which IS the 'off' state, so without this the automation would read its own
+# silence as a manual opt-out and could never resume (and a resume keyed on which trigger
+# fired would still strand the fan whenever the helper flips while HA is down or reloading).
 condition:
   - condition: template
     value_template: >-
-      {{ (force_manage or force_max or force_off or not is_state(booster_fan, 'off'))
-      and states(booster_fan) not in ['unavailable', 'unknown'] }}
+      {{ (force_manage or force_max or force_off
+          or force_off_entity not in [none, 'none', '']
+          or not is_state(booster_fan, 'off'))
+         and states(booster_fan) not in ['unavailable', 'unknown'] }}
 
 action:
   # Re-command only when current speed is more than one fan-step (>4%) off desired.
