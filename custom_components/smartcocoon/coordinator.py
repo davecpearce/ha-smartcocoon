@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, SCAN_INTERVAL_SECONDS
+from .const import DOMAIN, ROOM_SCAN_INTERVAL_SECONDS, SCAN_INTERVAL_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,3 +66,40 @@ class SmartCocoonCoordinator(DataUpdateCoordinator[None]):  # type: ignore[misc]
             # The fans keep their previous values; marking the update failed
             # makes the entities unavailable rather than quietly stale.
             raise UpdateFailed("Could not refresh SmartCocoon fans")
+
+
+class SmartCocoonRoomCoordinator(DataUpdateCoordinator[None]):  # type: ignore[misc]
+    """Refresh every room, and the sensors paired to them, on an interval.
+
+    Paired temperature and humidity sensors are only reported inside the
+    `rooms` response (ha-smartcocoon#422), which the fan coordinator never
+    requests. This polls it separately and less often, since the sensors
+    themselves report about every five minutes.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        scmanager: SmartCocoonManager,
+        config_entry: ConfigEntry | None = None,
+    ) -> None:
+        """Initialise the coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=config_entry,
+            name=f"{DOMAIN}_rooms",
+            update_interval=timedelta(seconds=ROOM_SCAN_INTERVAL_SECONDS),
+        )
+        self._scmanager = scmanager
+
+    async def _async_update_data(self) -> None:
+        """Fetch every room in one request."""
+        try:
+            refreshed = await self._scmanager.async_refresh_rooms()
+        except UnauthorizedError as err:
+            raise ConfigEntryAuthFailed(
+                "SmartCocoon rejected the stored credentials"
+            ) from err
+        if not refreshed:
+            raise UpdateFailed("Could not refresh SmartCocoon rooms")
