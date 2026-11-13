@@ -103,6 +103,22 @@ Each fan entity carries these attributes alongside its state and `percentage`:
 | `room_name`, `room_id`, `fan_id`, `identifier`, `firmware_version`, `thermostat_vendor` | Descriptive details                                      |
 | `last_connected`, `last_disconnected`                                                   | When the connection monitor last saw the fan come and go |
 
+### Paired sensors
+
+If a SmartCocoon temperature and humidity sensor is paired to a room, its readings are
+added to that room's fan device:
+
+| Entity                 | Meaning                                                      |
+| ---------------------- | ------------------------------------------------------------ |
+| Temperature            | Room temperature, °C                                         |
+| Humidity               | Relative humidity, %                                         |
+| Sensor battery voltage | Battery voltage (diagnostic). About 3.0 V on fresh batteries |
+| Sensor last seen       | When the sensor last reported to the cloud (diagnostic)      |
+
+A sensor in a room without a fan appears as its own device, **"<Room> Sensor"**.
+Readings refresh every five minutes, which is about how often the sensors report. A
+sensor paired after setup appears once the integration is reloaded.
+
 ### Options
 
 These options make recovery behavior more predictable and user friendly:

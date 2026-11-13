@@ -41,5 +41,15 @@
         "title": "SmartCocoon Options"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "battery_voltage": {
+        "name": "Sensor battery voltage"
+      },
+      "last_seen": {
+        "name": "Sensor last seen"
+      }
+    }
   }
 }
