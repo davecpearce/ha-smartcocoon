@@ -7,11 +7,13 @@ the room coordinator that refreshes them and the entities that show them.
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from pysmartcocoon.errors import UnauthorizedError
+import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.smartcocoon.const import DOMAIN
 from custom_components.smartcocoon.coordinator import SmartCocoonRoomCoordinator
 from custom_components.smartcocoon.sensor import SENSOR_DESCRIPTIONS, SmartCocoonSensor
 from homeassistant.core import HomeAssistant
@@ -62,9 +64,10 @@ async def test_room_coordinator_refreshes_rooms(hass: HomeAssistant) -> None:
     scmanager = MagicMock(async_refresh_rooms=AsyncMock(return_value=True))
     coordinator = SmartCocoonRoomCoordinator(hass, scmanager)
 
-    await coordinator._async_update_data()  # pylint: disable=protected-access
+    await coordinator.async_refresh()
 
     scmanager.async_refresh_rooms.assert_awaited_once()
+    assert coordinator.last_update_success is True
 
 
 async def test_room_coordinator_failure_is_an_update_failure(
@@ -74,27 +77,35 @@ async def test_room_coordinator_failure_is_an_update_failure(
     scmanager = MagicMock(async_refresh_rooms=AsyncMock(return_value=False))
     coordinator = SmartCocoonRoomCoordinator(hass, scmanager)
 
-    with pytest.raises(UpdateFailed):
-        await coordinator._async_update_data()  # pylint: disable=protected-access
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success is False
+    assert isinstance(coordinator.last_exception, UpdateFailed)
 
 
 async def test_room_coordinator_rejected_login_asks_for_reauth(
     hass: HomeAssistant,
 ) -> None:
     """Rejected credentials start reauth, as for the fans."""
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
     scmanager = MagicMock(
         async_refresh_rooms=AsyncMock(side_effect=UnauthorizedError("401"))
     )
-    coordinator = SmartCocoonRoomCoordinator(hass, scmanager)
+    coordinator = SmartCocoonRoomCoordinator(hass, scmanager, entry)
 
-    with pytest.raises(ConfigEntryAuthFailed):
-        await coordinator._async_update_data()  # pylint: disable=protected-access
+    with patch.object(entry, "async_start_reauth") as start_reauth:
+        await coordinator.async_refresh()
+
+    assert coordinator.last_update_success is False
+    assert isinstance(coordinator.last_exception, ConfigEntryAuthFailed)
+    start_reauth.assert_called_once()
 
 
 # --- entities ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
+@pytest.mark.parametrize(  # type: ignore[untyped-decorator]
     ("key", "expected"),
     [
         ("temperature", 19.85),

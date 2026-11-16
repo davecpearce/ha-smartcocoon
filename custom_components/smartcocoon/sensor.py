@@ -47,6 +47,9 @@ class SmartCocoonSensorDescription(SensorEntityDescription):  # type: ignore[mis
     value_fn: Callable[[Any], float | datetime | None]
 
 
+# pylint's hook runs without Home Assistant installed, so it cannot see the
+# fields SensorEntityDescription contributes and flags every keyword below.
+# pylint: disable=unexpected-keyword-arg
 SENSOR_DESCRIPTIONS: tuple[SmartCocoonSensorDescription, ...] = (
     SmartCocoonSensorDescription(
         key="temperature",
@@ -85,6 +88,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartCocoonSensorDescription, ...] = (
         value_fn=lambda sensor: sensor.last_connection,
     ),
 )
+# pylint: enable=unexpected-keyword-arg
 
 
 async def async_setup_entry(
