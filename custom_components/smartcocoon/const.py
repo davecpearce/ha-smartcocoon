@@ -16,6 +16,10 @@ DEFAULT_CONNECTION_CHECK_INTERVAL = 1  # 1 hour
 DOMAIN = "smartcocoon"
 # How often every fan is refreshed from the cloud, in one request.
 SCAN_INTERVAL_SECONDS = 60
+# How often rooms, and the sensors paired to them, are refreshed. The
+# sensors report to the cloud about every five minutes (ha-smartcocoon#422),
+# so polling faster only repeats the same readings.
+ROOM_SCAN_INTERVAL_SECONDS = 300
 # The top of the API's `speed_level` scale. Inferred, not documented: a fan at
 # full power reported 12, and the app's 17% for a fan reporting level 2 is
 # 2/12. Used to turn the level into the percentage Home Assistant displays.

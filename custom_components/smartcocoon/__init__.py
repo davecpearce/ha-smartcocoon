@@ -31,12 +31,12 @@ from .const import (
     DEFAULT_RECOVERY_RESET_INTERVAL,
     DOMAIN,
 )
-from .coordinator import SmartCocoonCoordinator
+from .coordinator import SmartCocoonCoordinator, SmartCocoonRoomCoordinator
 from .error_handler import RetryConfig, SmartCocoonErrorHandler
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["fan"]
+PLATFORMS = ["fan", "sensor"]
 
 
 class SmartCocoonController:
@@ -64,6 +64,7 @@ class SmartCocoonController:
         self._session: ClientSession | None = None
         self._connection_monitor: ConnectionMonitor | None = None
         self._coordinator: SmartCocoonCoordinator | None = None
+        self._room_coordinator: SmartCocoonRoomCoordinator | None = None
         self._max_offline_duration = max_offline_duration
         self._recovery_attempt_interval = recovery_attempt_interval
         self._max_recovery_attempts_per_hour = max_recovery_attempts_per_hour
@@ -159,6 +160,15 @@ class SmartCocoonController:
         self._coordinator = coordinator
 
     @property
+    def room_coordinator(self) -> SmartCocoonRoomCoordinator | None:
+        """Return the coordinator for rooms and their paired sensors."""
+        return self._room_coordinator
+
+    @room_coordinator.setter
+    def room_coordinator(self, coordinator: SmartCocoonRoomCoordinator) -> None:
+        self._room_coordinator = coordinator
+
+    @property
     def connection_monitor(self) -> ConnectionMonitor | None:
         """Return the connection monitor instance."""
         return self._connection_monitor
@@ -237,6 +247,17 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     coordinator = SmartCocoonCoordinator(hass, smartcocoon.scmanager, config_entry)
     await coordinator.async_config_entry_first_refresh()
     smartcocoon.coordinator = coordinator
+
+    # Paired sensors arrive with the rooms, which async_start has already
+    # loaded once. A failed first refresh here should not stop the fans
+    # from setting up, so this uses async_refresh rather than the
+    # first-refresh variant that raises ConfigEntryNotReady; the sensors
+    # start unavailable and recover on the next poll.
+    room_coordinator = SmartCocoonRoomCoordinator(
+        hass, smartcocoon.scmanager, config_entry
+    )
+    await room_coordinator.async_refresh()
+    smartcocoon.room_coordinator = room_coordinator
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][config_entry.entry_id] = smartcocoon
