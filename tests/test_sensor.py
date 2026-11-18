@@ -167,3 +167,14 @@ def test_sensor_without_a_fan_gets_its_own_device() -> None:
     assert info["name"] == "Main Bathroom Sensor"
     assert info["suggested_area"] == "Main Bathroom"
     assert "via_device" not in info
+
+
+def test_only_last_seen_is_disabled_by_default() -> None:
+    """Last seen changes every report and would fill Activity, so it is opt-in.
+
+    The readings themselves stay enabled.
+    """
+    disabled = {
+        key for key, d in DESCRIPTIONS.items() if not d.entity_registry_enabled_default
+    }
+    assert disabled == {"last_seen"}

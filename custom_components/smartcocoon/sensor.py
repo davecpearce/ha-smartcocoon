@@ -85,6 +85,9 @@ SENSOR_DESCRIPTIONS: tuple[SmartCocoonSensorDescription, ...] = (
         translation_key="last_seen",
         device_class=SensorDeviceClass.TIMESTAMP,
         entity_category=EntityCategory.DIAGNOSTIC,
+        # A timestamp has no unit, so the logbook records every change: one
+        # Activity entry per sensor every five minutes. Opt-in instead.
+        entity_registry_enabled_default=False,
         value_fn=lambda sensor: sensor.last_connection,
     ),
 )
