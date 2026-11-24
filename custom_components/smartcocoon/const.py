@@ -20,6 +20,12 @@ SCAN_INTERVAL_SECONDS = 60
 # sensors report to the cloud about every five minutes (ha-smartcocoon#422),
 # so polling faster only repeats the same readings.
 ROOM_SCAN_INTERVAL_SECONDS = 300
+# A sensor that has not reported for this long has stopped, most likely on a
+# flat battery (ha-smartcocoon#457). The cloud keeps listing it with its last
+# readings, so without this they would look current indefinitely. A healthy
+# sensor's reading is at most about ten minutes old (five-minute reports,
+# five-minute polls), so this allows a couple of missed reports.
+SENSOR_STALE_AFTER_MINUTES = 30
 # The top of the API's `speed_level` scale. Inferred, not documented: a fan at
 # full power reported 12, and the app's 17% for a fan reporting level 2 is
 # 2/12. Used to turn the level into the percentage Home Assistant displays.
