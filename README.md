@@ -120,6 +120,11 @@ Sensors report to the SmartCocoon cloud every five minutes, and the integration 
 on the same interval, so a reading can be up to about ten minutes old. A sensor paired
 after setup appears once the integration is reloaded.
 
+If a sensor hasn't reported for 30 minutes, for example because its battery is flat,
+**Temperature** and **Humidity** become unavailable instead of holding the last reading.
+**Sensor battery voltage** and **Sensor last seen** keep their last values, which usually
+show why it stopped.
+
 ### Options
 
 These options make recovery behavior more predictable and user friendly:

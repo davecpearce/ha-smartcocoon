@@ -4,11 +4,13 @@ The cloud reports each sensor inside the room it is paired to. These cover
 the room coordinator that refreshes them and the entities that show them.
 """
 
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from freezegun import freeze_time
 from pysmartcocoon.errors import UnauthorizedError
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -21,6 +23,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 ROOM_ID = 93694
+LAST_REPORT = datetime(2026, 11, 12, 1, 49, 15, tzinfo=timezone.utc)
 DESCRIPTIONS = {d.key: d for d in SENSOR_DESCRIPTIONS}
 
 
@@ -32,7 +35,7 @@ def _sensor(**overrides: Any) -> SimpleNamespace:
         "temperature": 19.85,
         "humidity": 52.95,
         "battery_voltage": 3.002,
-        "last_connection": datetime(2026, 11, 12, 1, 49, 15, tzinfo=timezone.utc),
+        "last_connection": LAST_REPORT,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -54,6 +57,13 @@ def _entity(
     return SmartCocoonSensor(
         coordinator, scmanager or _scmanager(), ROOM_ID, DESCRIPTIONS[key]
     )
+
+
+@pytest.fixture(autouse=True)  # type: ignore[untyped-decorator]
+def _recent_report() -> Iterator[None]:
+    """Run each test shortly after the sensor last reported."""
+    with freeze_time(LAST_REPORT + timedelta(minutes=4)):
+        yield
 
 
 # --- coordinator ------------------------------------------------------------
@@ -178,3 +188,38 @@ def test_only_last_seen_is_disabled_by_default() -> None:
         key for key, d in DESCRIPTIONS.items() if not d.entity_registry_enabled_default
     }
     assert disabled == {"last_seen"}
+
+
+# --- a sensor that stops reporting (#457) ----------------------------------
+
+
+def _entity_at(key: str, minutes_since_report: float, **overrides: Any) -> bool:
+    """Return whether the entity is available that long after the report."""
+    entity = _entity(key, _scmanager(_sensor(**overrides)))
+    with freeze_time(LAST_REPORT + timedelta(minutes=minutes_since_report)):
+        return entity.available
+
+
+@pytest.mark.parametrize("key", ["temperature", "humidity"])  # type: ignore[untyped-decorator]
+def test_readings_go_unavailable_when_the_sensor_stops(key: str) -> None:
+    """A dead sensor's last readings are not shown as current."""
+    assert _entity_at(key, 29) is True
+    assert _entity_at(key, 31) is False
+
+
+@pytest.mark.parametrize("key", ["battery_voltage", "last_seen"])  # type: ignore[untyped-decorator]
+def test_diagnostics_stay_when_the_sensor_stops(key: str) -> None:
+    """The last voltage and report time are the clue to why it stopped."""
+    assert _entity_at(key, 600) is True
+
+
+def test_a_sensor_without_a_report_time_is_not_stale() -> None:
+    """With no time to judge by, the readings stay available."""
+    assert _entity_at("temperature", 600, last_connection=None) is True
+
+
+def test_a_report_time_without_an_offset_is_read_as_utc() -> None:
+    """A naive timestamp is compared as UTC instead of raising."""
+    naive = LAST_REPORT.replace(tzinfo=None)
+    assert _entity_at("temperature", 29, last_connection=naive) is True
+    assert _entity_at("temperature", 31, last_connection=naive) is False

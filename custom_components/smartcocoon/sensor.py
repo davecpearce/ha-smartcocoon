@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
@@ -32,9 +32,10 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from . import SmartCocoonController
-from .const import DOMAIN
+from .const import DOMAIN, SENSOR_STALE_AFTER_MINUTES
 from .coordinator import SmartCocoonRoomCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +46,10 @@ class SmartCocoonSensorDescription(SensorEntityDescription):  # type: ignore[mis
     """Describe one reading of a paired sensor."""
 
     value_fn: Callable[[Any], float | datetime | None]
+    # Unavailable once the sensor stops reporting. Set for the readings, which
+    # would otherwise look current; left off for battery voltage and last
+    # seen, whose last values are the clue to why it stopped.
+    unavailable_when_stale: bool = False
 
 
 # pylint's hook runs without Home Assistant installed, so it cannot see the
@@ -58,6 +63,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartCocoonSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         suggested_display_precision=1,
         value_fn=lambda sensor: sensor.temperature,
+        unavailable_when_stale=True,
     ),
     SmartCocoonSensorDescription(
         key="humidity",
@@ -66,6 +72,7 @@ SENSOR_DESCRIPTIONS: tuple[SmartCocoonSensorDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=0,
         value_fn=lambda sensor: sensor.humidity,
+        unavailable_when_stale=True,
     ),
     SmartCocoonSensorDescription(
         # The API's battery_level reads as millivolts; the library converts.
@@ -123,6 +130,22 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
+def _is_stale(sensor: Any) -> bool:
+    """Return whether the sensor has stopped reporting.
+
+    A sensor without a last-connection time is given the benefit of the
+    doubt: there is nothing to judge it by. The cloud sends UTC; a time
+    without an offset is read as UTC rather than failing the comparison.
+    """
+    last_connection: datetime | None = sensor.last_connection
+    if last_connection is None:
+        return False
+    if last_connection.tzinfo is None:
+        last_connection = last_connection.replace(tzinfo=dt_util.UTC)
+    age: timedelta = dt_util.utcnow() - last_connection
+    return age > timedelta(minutes=SENSOR_STALE_AFTER_MINUTES)
+
+
 class SmartCocoonSensor(
     CoordinatorEntity[SmartCocoonRoomCoordinator],  # type: ignore[misc]
     SensorEntity,  # type: ignore[misc]
@@ -157,8 +180,17 @@ class SmartCocoonSensor(
 
     @property
     def available(self) -> bool:
-        """Available while polling works and the sensor is still paired."""
-        return bool(super().available) and self._sensor() is not None
+        """Available while polling works and the sensor is still paired.
+
+        Temperature and humidity also go unavailable once the sensor has
+        stopped reporting, rather than showing its last readings as current.
+        """
+        sensor = self._sensor()
+        if not super().available or sensor is None:
+            return False
+        if self.entity_description.unavailable_when_stale:
+            return not _is_stale(sensor)
+        return True
 
     @property
     def native_value(self) -> float | datetime | None:
